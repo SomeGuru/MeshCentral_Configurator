@@ -1,72 +1,96 @@
-// Configurator.js created for MeshCentral-data config.json file creation. This will ask the questions to generate the file demo-config.json. simple rename of the file and running of meshcentral should garner a working server with the changes done by the scripts config.json creation.
+// Configurator.js created for "MeshCentral-data" "config.json" file creation. 
+// This script generates a demo-config.json file by prompting the user for configuration values.
+// Prerequisits to use this script requires NodeJS and a few modules: npm install axios prompt-sync fs
+// To use the created script "demo-config.json" rename it to "config.json" and place it in the meshcentral-data directory.
 // License: Apache2 GPL
 // Creator: Mike Larios
 // Date: 01/01/2024 11:45am PST
 
 const fs = require('fs');
+const axios = require('axios');
+const prompt = require('prompt-sync')();
 
-// Check if dependencies are installed
-try {
-    var axios = require('axios');
-    var prompt = require('prompt-sync')();
-} catch (error) {
-    console.error('Dependencies not installed. Please run "npm install axios prompt-sync" and try again.');
-    process.exit(1);
-}
-
-// Define the schema URL
 const schemaUrl = 'https://raw.githubusercontent.com/Ylianst/MeshCentral/master/meshcentral-config-schema.json';
 
-// Function to handle each property
-function handleProperty(schema, config, property) {
-    // Check if the property is an object
-    if (schema.properties[property].type === 'object') {
-        // Ask the user a yes/no question about including this property
-        let answer = prompt(`Do you want to include ${property}? (y/n/yes/no) `).toLowerCase();
+async function generateConfig() {
+    try {
+        const response = await axios.get(schemaUrl);
+        const schema = response.data;
+        const config = {};
 
-        // If the user answers 'y' or 'yes', handle each nested property
-        if (answer === 'y' || answer === 'yes') {
-            config[property] = {};
-            for (let nestedProperty in schema.properties[property].properties) {
-                handleProperty(schema.properties[property], config[property], nestedProperty);
+        async function handleProperty(schema, config, property) {
+            const propertySchema = schema.properties[property];
+
+            if (propertySchema.type === 'object') {
+                const include = prompt(`Do you want to include ${property}? (y/n): `).toLowerCase();
+                if (include === 'y') {
+                    config[property] = {};
+                    if (propertySchema.properties) { // Check if properties exist
+                        for (const nestedProperty in propertySchema.properties) {
+                            await handleProperty(propertySchema, config[property], nestedProperty);
+                        }
+                    }
+                }
+            } else {
+                let value;
+                let isValid = false;
+
+                while (!isValid) {
+                    const promptMessage = propertySchema.description ?
+                        `${property} (${propertySchema.type}): ${propertySchema.description} (${propertySchema.default !== undefined ? `Default: ${propertySchema.default}` : ''})` : // Use !== for undefined check
+                        `${property} (${propertySchema.type}): `;
+
+                    value = prompt(promptMessage);
+
+                    if (value === "" && propertySchema.default !== undefined) { // Use !== for undefined check
+                        value = propertySchema.default;
+                    }
+    switch (propertySchema.type) {
+                        case 'boolean':
+                            if (typeof value === 'string') { // Check if value is a string before toLowerCase()
+                                const lowerValue = value.toLowerCase();
+                                if (lowerValue === 'true' || lowerValue === 't' || lowerValue === 'false' || lowerValue === 'f') {
+                                    value = lowerValue === 'true' || lowerValue === 't';
+                                    isValid = true;
+                                } else {
+                                    console.log("Invalid boolean value. Please enter true/t or false/f.");
+                                }
+                            } else if (typeof value === 'boolean') { // Handle boolean values directly
+                                isValid = true;
+                            } else {
+                              console.log("Invalid boolean value. Please enter true/t or false/f.");
+                            }
+                            break;
+                        case 'number':
+                        case 'integer':
+                            const numValue = Number(value);
+                            if (!isNaN(numValue)) {
+                                value = numValue;
+                                isValid = true;
+                            } else {
+                                console.log("Invalid number. Please enter a valid number.");
+                            }
+                            break;
+                        case 'string':
+                        default:
+                            isValid = true;
+                            break;
+                    }
+                }
+                config[property] = value;
             }
-        } else if (answer === 'n' || answer === 'no') {
-            // If the user answers 'n' or 'no', prefix the property with an underscore to disable it
-            config['_' + property] = {};
         }
-    } else {
-        // Ask the user for the value of the property
-        let value;
-        // If the property is a boolean, convert 't', 'true', 'f', or 'false' to their boolean equivalents
-        if (schema.properties[property].type === 'boolean') {
-            value = prompt(`Enter a value for ${property} (t/f/true/false): `).toLowerCase();
-            if (value === 't' || value === 'true') {
-                value = true;
-            } else if (value === 'f' || value === 'false') {
-                value = false;
-            }
-        } else {
-            value = prompt(`Enter a value for ${property}: `);
+
+        for (const property in schema.properties) {
+            await handleProperty(schema, config, property);
         }
-        config[property] = value;
+
+        fs.writeFileSync('demo-config.json', JSON.stringify(config, null, 2));
+        console.log('Configuration saved to demo-config.json');
+
+    } catch (error) {
+        console.error(`Failed to fetch or process schema: ${error}`);
     }
 }
 
-// Fetch the schema
-axios.get(schemaUrl).then(response => {
-    const schema = response.data;
-
-    // Initialize an empty config object
-    let config = {};
-
-    // Iterate over each property in the schema
-    for (let property in schema.properties) {
-        handleProperty(schema, config, property);
-    }
-
-    // Write the config to a file
-    fs.writeFileSync('demo-config.json', JSON.stringify(config, null, 2));
-    console.log('Configuration saved to demo-config.json');
-}).catch(error => {
-    console.error(`Failed to fetch schema: ${error}`);
-});
+generateConfig();
